@@ -305,25 +305,79 @@ class LibraryServer:
                 "message": "Book is currently borrowed. You can subscribe to the waiting queue.",
                 "book": book,
             }
+        notified_user = book.get("notified_user")
 
-        due_date = datetime.now(timezone.utc) + timedelta(seconds=20)
+        if notified_user is not None and notified_user != user_id:
+            return {
+                "success": False,
+                "message": "This book is temporarily reserved for another user in the queue.",
+                "notified_user": notified_user,
+            }
+
+        due_date = datetime.now(timezone.utc) + timedelta(seconds=60)
 
         book["is_available"] = False
         book["borrowed_by"] = user_id
         book["due_date"] = due_date.isoformat()
         book["reserved_until"] = None
+        book["notified_user"] = None
+        book["due_reminder_sent"]=False
 
         event = self.message_broker.publish(
             "BOOK_RESERVED",
             f"{book['title']} was reserved by {user_id}. Due date: {book['due_date']}.",
         )
-
+        Timer(40, self.send_book_due_reminder, args=[book_id]).start()
         return {
             "success": True,
             "message": "Book reserved successfully.",
             "book": book,
             "event": event,
         }
+    
+    def send_book_due_reminder(self, book_id: int) -> dict:
+        book = self._find_book(book_id)
+
+        if book is None:
+            return {"success": False, "message": "Book not found."}
+
+        if book["is_available"]:
+            return {"success": False, "message": "Book is already returned."}
+
+        if book.get("due_reminder_sent", False):
+            return {"success": False, "message": "Due reminder already sent."}
+
+        borrowed_by = book.get("borrowed_by")
+        due_date = book.get("due_date")
+
+        if borrowed_by is None or due_date is None:
+            return {"success": False, "message": "Book does not have an active borrower."}
+
+        due_date_time = datetime.fromisoformat(due_date)
+        now = datetime.now(timezone.utc)
+        remaining_seconds = int((due_date_time - now).total_seconds())
+
+        notification = self.notification_service.send(
+            user_id=borrowed_by,
+            title="Book Due Reminder",
+            message=f"{book['title']} must be returned in about {remaining_seconds} seconds.",
+        )
+
+        event = self.message_broker.publish(
+            "BOOK_DUE_REMINDER_SENT",
+            f"Due reminder sent to {borrowed_by} for {book['title']}.",
+        )
+
+        book["due_reminder_sent"] = True
+
+        return {
+            "success": True,
+            "message": "Due reminder sent.",
+            "book": book,
+            "notification": notification,
+            "event": event,
+        }
+
     
     def check_book_due_reminders(self) -> dict:
         now = datetime.now(timezone.utc)
@@ -429,42 +483,106 @@ class LibraryServer:
                 )
 
         return waiting_books
+    
+    def notify_next_book_waiting_user(self, book: dict) -> dict | None:
+        if not book["waiting_queue"]:
+            book["notified_user"] = None
+            book["reserved_until"] = None
+            return None
+
+        next_user = book["waiting_queue"].pop(0)
+        reserved_until = datetime.now(timezone.utc) + timedelta(seconds=20)
+
+        book["notified_user"] = next_user
+        book["reserved_until"] = reserved_until.isoformat()
+
+        notification = self.notification_service.send(
+            user_id=next_user,
+            title="Book Available",
+            message=f"{book['title']} is now available for you. Please reserve it within 20 seconds.",
+        )
+
+        self.message_broker.publish(
+            "BOOK_QUEUE_NOTIFICATION_SENT",
+            f"Notification sent to {next_user} for {book['title']}.",
+        )
+
+        Timer(20, self.check_expired_book_pickups).start()
+
+        return notification
+
 
 
     def return_book(self, book_id: int) -> dict:
-        
         book = self._find_book(book_id)
 
         if book is None:
             return {"success": False, "message": "Book not found."}
 
+        if book["is_available"]:
+            return {"success": False, "message": "Book is already available."}
+
+        previous_borrower = book.get("borrowed_by")
+
         book["is_available"] = True
+        book["borrowed_by"] = None
+        book["due_date"] = None
+        book["due_reminder_sent"] = False
 
         published_event = self.message_broker.publish(
             "BOOK_RETURNED",
-            f"{book['title']} was returned. Related subscribers will be notified.",
+            f"{book['title']} was returned to the library by {previous_borrower}.",
         )
 
-        notification = None
-        if book["waiting_queue"]:
-            first_user = book["waiting_queue"].pop(0)
-            notification = self.notification_service.send(
-                user_id=first_user,
-                title="Book Available",
-                message=f"{book['title']} is now available for you.",
-            )
-            self.message_broker.publish(
-                "NOTIFICATION_SENT",
-                f"Notification sent to {first_user} for {book['title']}.",
-            )
+        notification = self.notify_next_book_waiting_user(book)
 
         return {
             "success": True,
-            "message": "Book returned successfully.",
+            "message": "Book returned successfully by admin.",
             "book": book,
             "event": published_event,
             "notification": notification,
         }
+    
+    def check_expired_book_pickups(self) -> dict:
+        now = datetime.now(timezone.utc)
+        expired_pickups = []
+
+        for book in books:
+            reserved_until = book.get("reserved_until")
+            notified_user = book.get("notified_user")
+
+            if not book["is_available"] or reserved_until is None or notified_user is None:
+                continue
+
+            reserved_until_time = datetime.fromisoformat(reserved_until)
+
+            if reserved_until_time <= now:
+                expired_pickups.append(
+                    {
+                        "book_id": book["id"],
+                        "book_title": book["title"],
+                        "expired_user": notified_user,
+                    }
+                )
+
+                self.message_broker.publish(
+                    "BOOK_PICKUP_EXPIRED",
+                    f"{notified_user} did not reserve {book['title']} in time.",
+                )
+
+                book["notified_user"] = None
+                book["reserved_until"] = None
+
+                self.notify_next_book_waiting_user(book)
+
+        return {
+            "success": True,
+            "expired_pickups": expired_pickups,
+            "message": f"{len(expired_pickups)} expired book pickup(s) handled.",
+        }
+
+
 
     def _find_seat(self, seat_id: str) -> dict | None:
         return next((seat for seat in seats if seat["id"] == seat_id), None)

@@ -64,6 +64,11 @@ def get_books() -> list[dict]:
 def reserve_book(book_id: int, request: SubscribeBookRequest) -> dict:
     return library_server.reserve_book(book_id, request.user_id)
 
+@app.post("/books/{book_id}/send-due-reminder")
+def send_book_due_reminder(book_id: int) -> dict:
+    return library_server.send_book_due_reminder(book_id)
+
+
 @app.post("/system/check-book-due-reminders")
 def check_book_due_reminders() -> dict:
     return library_server.check_book_due_reminders()
@@ -85,9 +90,13 @@ def subscribe_to_book(book_id: int, request: SubscribeBookRequest) -> dict:
     return library_server.subscribe_to_book(book_id, request.user_id)
 
 
-@app.post("/books/{book_id}/return")
-def return_book(book_id: int) -> dict:
+@app.post("/admin/books/{book_id}/return")
+def admin_return_book(book_id: int) -> dict:
     return library_server.return_book(book_id)
+
+@app.post("/system/check-expired-book-pickups")
+def check_expired_book_pickups() -> dict:
+    return library_server.check_expired_book_pickups()
 
 
 @app.get("/notifications/{user_id}")

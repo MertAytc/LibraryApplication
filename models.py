@@ -25,8 +25,15 @@ class Book(BaseModel):
     id: int
     title: str
     author: str
+    category: str
     is_available: bool
+    borrowed_by: str | None = None
+    due_date: str | None = None
+    reserved_until: str | None = None
     waiting_queue: list[str] = []
+    notified_user: str | None = None
+
+
 
 
 class Notification(BaseModel):

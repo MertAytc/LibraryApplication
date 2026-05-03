@@ -18,6 +18,8 @@ books = [
         "due_date": None,
         "reserved_until": None,
         "waiting_queue": [],
+        "due_reminder_sent": False,
+        "notified_user": None
     },
     {
         "id": 2,
@@ -29,6 +31,8 @@ books = [
         "due_date": None,
         "reserved_until": None,
         "waiting_queue": [],
+        "due_reminder_sent": False,
+        "notified_user": None
     },
     {
         "id": 3,
@@ -40,6 +44,8 @@ books = [
         "due_date": None,
         "reserved_until": None,
         "waiting_queue": [],
+        "due_reminder_sent": False,
+        "notified_user": None
     },
 ]
 
