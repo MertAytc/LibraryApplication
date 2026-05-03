@@ -1,0 +1,473 @@
+from data import books, events, seats, seat_waiting_users, users
+from services.message_broker import MessageBroker
+from services.notification_service import NotificationService
+from datetime import datetime,timedelta,timezone
+from threading import Timer
+
+
+class LibraryServer:
+    def __init__(self) -> None:
+        self.message_broker = MessageBroker()
+        self.notification_service = NotificationService()
+
+    def get_seats(self) -> list[dict]:
+        return seats
+    
+    def get_user_seat_reservation(self, user_id: str) -> dict:
+        reservation = next(
+            (
+                seat
+                for seat in seats
+                if seat["reserved_by"] == user_id
+            ),
+            None,
+        )
+
+        if reservation is None:
+            return {
+                "success": False,
+                "message": "User does not have an active seat reservation.",
+                "seat": None,
+            }
+
+        return {
+            "success": True,
+            "message": "Active seat reservation found.",
+            "seat": reservation,
+        }
+
+
+    def reserve_seat(self, seat_id: str, user_id: str) -> dict:
+        seat = self._find_seat(seat_id)
+
+        if seat is None:
+            return {"success": False, "message": "Seat not found."}
+
+        existing_reservation = next(
+            (
+                seat_item
+                for seat_item in seats
+                if seat_item.get("reserved_by") == user_id
+            ),
+            None,
+        )
+
+        if existing_reservation is not None:
+            return {
+                "success": False,
+                "message": "User already has an active seat reservation.",
+                "seat": existing_reservation,
+            }
+
+        if not seat["is_available"]:
+            return {"success": False, "message": "Seat is already reserved."}
+        
+        reserved_until = datetime.now(timezone.utc) + timedelta(seconds=55)
+
+        seat["is_available"] = False
+        seat["reserved_by"] = user_id
+        seat["reserved_until"] = reserved_until.isoformat()
+        seat["qr_checked"] = False
+
+        event = self.message_broker.publish(
+            "SEAT_RESERVED",
+            f"Seat {seat_id} was reserved by {user_id} until {seat['reserved_until']}.",
+        )
+
+        occupancy_event = self.check_seat_occupancy()
+
+        Timer(55, self.check_expired_seat_reservations).start()
+
+        return {
+            "success": True,
+            "message": "Seat reserved successfully.",
+            "seat": seat,
+            "event": event,
+            "occupancy_event": occupancy_event,
+        }
+    
+    def check_in_seat(self, seat_id: str) -> dict:
+        seat = self._find_seat(seat_id)
+
+        if seat is None:
+            return {"success": False, "message": "Seat not found."}
+
+        if seat["is_available"]:
+            return {"success": False, "message": "Seat is not reserved."}
+
+        if seat.get("qr_checked", False):
+            return {"success": False, "message": "Seat is already checked in."}
+
+        seat["qr_checked"] = True
+        seat["reserved_until"] = None
+
+        event = self.message_broker.publish(
+            "SEAT_CHECKED_IN",
+            f"{seat['reserved_by']} checked in to seat {seat_id} by scanning QR code.",
+        )
+
+        return {
+            "success": True,
+            "message": "Seat check-in successful. Seat is now occupied.",
+            "seat": seat,
+            "event": event,
+        }
+    
+    def release_seat(self, seat_id: str) -> dict:
+        seat = self._find_seat(seat_id)
+
+        if seat is None:
+            return {"success": False, "message": "Seat not found."}
+
+        if seat["is_available"]:
+            return {"success": False, "message": "Seat is already available."}
+
+        seat["is_available"] = True
+        seat["reserved_by"] = None
+        seat["reserved_until"] = None
+        seat["qr_checked"] = False
+
+        event = self.message_broker.publish(
+            "SEAT_RELEASED",
+            f"Seat {seat_id} was manually released and became available.",
+        )
+
+        seat_notifications = self.notify_seat_waiting_users(seat_id)
+
+        return {
+            "success": True,
+            "message": "Seat released successfully.",
+            "seat": seat,
+            "event": event,
+            "seat_notifications": seat_notifications,
+        }
+    
+    def check_seat_occupancy(self) -> dict | None:
+        total_seats = len(seats)
+        reserved_or_occupied_seats = len([
+            seat for seat in seats
+            if not seat["is_available"]
+        ])
+
+        occupancy_rate = reserved_or_occupied_seats / total_seats
+
+        if occupancy_rate <= 0.8:
+            return None
+
+        event = self.message_broker.publish(
+            "SEAT_OCCUPANCY_HIGH",
+            f"Library seat occupancy is above 80%. Current occupancy: {occupancy_rate * 100:.0f}%.",
+        )
+
+        sent_notifications = []
+
+        for user_id in users:
+            notification = self.notification_service.send(
+                user_id=user_id,
+                title="Library is crowded",
+                message=f"Seat occupancy is above 80%. Current occupancy: {occupancy_rate * 100:.0f}%.",
+            )
+            sent_notifications.append(notification)
+
+        self.message_broker.publish(
+            "BROADCAST_NOTIFICATION_SENT",
+            "High occupancy notification sent to all users.",
+        )
+
+        return {
+            "event": event,
+            "sent_notifications": sent_notifications,
+            "occupancy_rate": occupancy_rate,
+        }
+    
+    def subscribe_to_seat_availability(self, user_id: str) -> dict:
+        available_seats = [
+            seat for seat in seats
+            if seat["is_available"]
+        ]
+
+        if available_seats:
+            return {
+                "success": False,
+                "message": "There are already available seats.",
+                "available_seats": available_seats,
+            }
+
+        if user_id in seat_waiting_users:
+            return {
+                "success": False,
+                "message": "User is already subscribed to seat availability notifications.",
+            }
+
+        seat_waiting_users.append(user_id)
+
+        event = self.message_broker.publish(
+            "SEAT_AVAILABILITY_SUBSCRIBED",
+            f"{user_id} subscribed to seat availability notifications.",
+        )
+
+        return {
+            "success": True,
+            "message": "User will be notified when a seat becomes available.",
+            "waiting_users": seat_waiting_users,
+            "event": event,
+        }
+
+    def notify_seat_waiting_users(self, seat_id: str) -> list[dict]:
+        sent_notifications = []
+
+        if not seat_waiting_users:
+            return sent_notifications
+
+        for user_id in seat_waiting_users:
+            notification = self.notification_service.send(
+                user_id=user_id,
+                title="Seat Available",
+                message=f"Seat {seat_id} is now available.",
+            )
+            sent_notifications.append(notification)
+
+        self.message_broker.publish(
+            "SEAT_AVAILABLE_NOTIFICATION_SENT",
+            f"Seat availability notification sent to {len(seat_waiting_users)} user(s).",
+        )
+
+        seat_waiting_users.clear()
+
+        return sent_notifications
+
+
+
+    def check_expired_seat_reservations(self) -> dict:
+        now = datetime.now(timezone.utc)
+        expired_seats = []
+
+        for seat in seats:
+            reserved_until = seat.get("reserved_until")
+
+            if seat["is_available"] or seat.get("qr_checked", False) or reserved_until is None:
+                continue
+
+            reserved_until_time = datetime.fromisoformat(reserved_until)
+
+            if reserved_until_time <= now:
+                expired_seats.append(seat["id"])
+
+                seat["is_available"] = True
+                seat["reserved_by"] = None
+                seat["reserved_until"] = None
+                seat["qr_checked"] = False
+
+                self.message_broker.publish(
+                    "SEAT_RESERVATION_EXPIRED",
+                    f"Seat {seat['id']} reservation expired and became available again.",
+                )
+
+                self.notify_seat_waiting_users(seat["id"])
+
+        return {
+            "success": True,
+            "expired_seats": expired_seats,
+            "message": f"{len(expired_seats)} expired seat reservation(s) cleared.",
+        }
+    
+    def get_seat_occupancy(self) -> dict:
+        total_seats = len(seats)
+        occupied_or_reserved = len([
+            seat
+            for seat in seats
+            if not seat["is_available"]
+        ])
+
+        occupancy_rate = occupied_or_reserved / total_seats
+
+        return {
+            "total_seats": total_seats,
+            "occupied_or_reserved": occupied_or_reserved,
+            "available_seats": total_seats - occupied_or_reserved,
+            "occupancy_rate": occupancy_rate,
+            "occupancy_percent": round(occupancy_rate * 100, 2),
+        }
+   
+ 
+    def get_books(self) -> list[dict]:
+        return books
+    
+    def reserve_book(self, book_id: int, user_id: str) -> dict:
+        book = self._find_book(book_id)
+
+        if book is None:
+            return {"success": False, "message": "Book not found."}
+
+        if not book["is_available"]:
+            return {
+                "success": False,
+                "message": "Book is currently borrowed. You can subscribe to the waiting queue.",
+                "book": book,
+            }
+
+        due_date = datetime.now(timezone.utc) + timedelta(seconds=20)
+
+        book["is_available"] = False
+        book["borrowed_by"] = user_id
+        book["due_date"] = due_date.isoformat()
+        book["reserved_until"] = None
+
+        event = self.message_broker.publish(
+            "BOOK_RESERVED",
+            f"{book['title']} was reserved by {user_id}. Due date: {book['due_date']}.",
+        )
+
+        return {
+            "success": True,
+            "message": "Book reserved successfully.",
+            "book": book,
+            "event": event,
+        }
+    
+    def check_book_due_reminders(self) -> dict:
+        now = datetime.now(timezone.utc)
+        reminder_threshold = now + timedelta(days=2)
+        sent_reminders = []
+
+        for book in books:
+            due_date = book.get("due_date")
+            borrowed_by = book.get("borrowed_by")
+
+            if book["is_available"] or due_date is None or borrowed_by is None:
+                continue
+
+            if book.get("due_reminder_sent", False):
+                continue
+
+            due_date_time = datetime.fromisoformat(due_date)
+
+            if due_date_time <= reminder_threshold:
+                notification = self.notification_service.send(
+                    user_id=borrowed_by,
+                    title="Book Due Reminder",
+                    message=f"{book['title']} must be returned by {book['due_date']}.",
+                )
+
+                event = self.message_broker.publish(
+                    "BOOK_DUE_REMINDER_SENT",
+                    f"Due reminder sent to {borrowed_by} for {book['title']}.",
+                )
+
+                book["due_reminder_sent"] = True
+
+                sent_reminders.append(
+                    {
+                        "book": book,
+                        "notification": notification,
+                        "event": event,
+                    }
+                )
+
+        return {
+            "success": True,
+            "sent_reminders": sent_reminders,
+            "message": f"{len(sent_reminders)} due reminder(s) sent.",
+        }
+
+
+    
+    def search_books(self, query: str) -> list[dict]:
+        query = query.lower()
+
+        matched_books = [
+            {
+                **book,
+                "queue_count": len(book.get("waiting_queue", [])),
+            }
+            for book in books
+            if query in book.get("title", "").lower()
+            or query in book.get("author", "").lower()
+            or query in book.get("category", "").lower()
+        ]
+
+        return matched_books
+
+
+
+    def subscribe_to_book(self, book_id: int, user_id: str) -> dict:
+        book = self._find_book(book_id)
+
+        if book is None:
+            return {"success": False, "message": "Book not found."}
+
+        if book["is_available"]:
+            return {"success": False, "message": "Book is already available."}
+
+        if user_id in book["waiting_queue"]:
+            return {"success": False, "message": "User is already in the queue."}
+
+        book["waiting_queue"].append(user_id)
+
+        event = self.message_broker.publish(
+            "BOOK_SUBSCRIBED",
+            f"{user_id} subscribed to {book['title']}.",
+        )
+
+        return {
+            "success": True,
+            "message": "User subscribed and added to waiting queue.",
+            "book": book,
+            "event": event,
+        }
+    def get_user_waiting_books(self, user_id: str) -> list[dict]:
+        waiting_books = []
+
+        for book in books:
+            if user_id in book["waiting_queue"]:
+                waiting_books.append(
+                    {
+                        **book,
+                        "queue_position": book["waiting_queue"].index(user_id) + 1,
+                        "queue_count": len(book["waiting_queue"]),
+                    }
+                )
+
+        return waiting_books
+
+
+    def return_book(self, book_id: int) -> dict:
+        
+        book = self._find_book(book_id)
+
+        if book is None:
+            return {"success": False, "message": "Book not found."}
+
+        book["is_available"] = True
+
+        published_event = self.message_broker.publish(
+            "BOOK_RETURNED",
+            f"{book['title']} was returned. Related subscribers will be notified.",
+        )
+
+        notification = None
+        if book["waiting_queue"]:
+            first_user = book["waiting_queue"].pop(0)
+            notification = self.notification_service.send(
+                user_id=first_user,
+                title="Book Available",
+                message=f"{book['title']} is now available for you.",
+            )
+            self.message_broker.publish(
+                "NOTIFICATION_SENT",
+                f"Notification sent to {first_user} for {book['title']}.",
+            )
+
+        return {
+            "success": True,
+            "message": "Book returned successfully.",
+            "book": book,
+            "event": published_event,
+            "notification": notification,
+        }
+
+    def _find_seat(self, seat_id: str) -> dict | None:
+        return next((seat for seat in seats if seat["id"] == seat_id), None)
+
+    def _find_book(self, book_id: int) -> dict | None:
+        return next((book for book in books if book["id"] == book_id), None)
