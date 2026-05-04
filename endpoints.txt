@@ -1,34 +1,52 @@
 USER PART
-POST /users/register
-POST /users/login
-GET  /preferences/options
-POST /users/{user_id}/preferences
-GET  /users/{user_id}/preferences
-
+POST /users/register -> kullanıcı kayıt olur.
+POST /users/login -> kullanıcı giriş yapar.
+GET  /preferences/options -> kullanıcı tercih seçeneklerini çeker.
+POST /users/{user_id}/preferences -> kullanıcı sevdiği kategori/yazarları seçer.
+GET  /users/{user_id}/preferences -> kullanıcının sevdiği kategori/yazarları görüntüler.
+GET /admin/users -> admin tüm kullanıcıları listeler.
+-------------------------------------------------------------------------------------------
 SEAT PART
-GET  /seats
-GET  /seats/occupancy
-POST /seats/{seat_id}/reserve
-POST /seats/{seat_id}/check-in
-GET  /users/{user_id}/seat-reservation
-POST /seats/subscribe-availability
-
+GET  /seats -> kullanıcı tüm koltukları görür.
+GET  /seats/occupancy-> koltuk doluluk oranı görüntülenir. %80'in üzerindeyse herkese bildirim gider.
+POST /seats/{seat_id}/reserve -> kullanıcı boş koltuk rezerve eder.
+POST /seats/{seat_id}/check-in -> kullanıcı QR check-in yapar.
+GET  /users/{user_id}/seat-reservation -> kullanıcı kendi rezerve ettiği koltuğu görüntüler.
+POST /seats/subscribe-availability -> tüm koltuklar doluysa kullanıc boş koltuk bildirimi almak için abone olabilir.
+POST /seats/{seat_id}/release -> admin dolu koltuğu manuel olarak boşa çıkarabilir.
+-------------------------------------------------------------------------------------------
 BOOK PART
-GET  /books
-GET  /books/search?query=...
-POST /books/{book_id}/reserve
-POST /books/{book_id}/subscribe
-GET  /users/{user_id}/waiting-books
-GET  /users/{user_id}/borrowed-books
-
+GET  /books -> kullanıcı kitapları görür.
+GET  /books/search?query=...  -> kullanıcı kitap aratır.
+POST /books/{book_id}/reserve -> kullanıcı boş bir kitabı rezerve edebilir.
+POST /books/{book_id}/subscribe -> kitap doluysa kitaba abone olabilir.
+GET  /users/{user_id}/waiting-books -> kullanıcı beklediği kitapları görüntüleyebilir.
+GET  /users/{user_id}/borrowed-books -> ödünç aldığı kitapları görüntüleyebilir.
+-------------------------------------------------------------------------------------------
 NOTIFICATION PART
-GET  /notifications/{user_id}
-
+GET  /notifications/{user_id} -> kullanıcı tüm bildirimlerini görüntüleyebilir.
+-------------------------------------------------------------------------------------------
 ADMIN PART
-POST /admin/books/{book_id}/return
-POST /admin/books
-GET  /events
-
+POST /admin/books/{book_id}/return -> admin kitap iadesi girebilir.
+POST /admin/books -> admin sisteme yeni kitap girebilir.
+GET  /events -> admin tüm eventleri görüntüleyebilir.
+-------------------------------------------------------------------------------------------
 Seat reservation expiry: 55 saniye
 Book due reminder: 40 saniye sonra
 Book queue pickup: 20 saniye
+-------------------------------------------------------------------------------------------
+EVENTS
+USER_REGISTERED
+USER_PREFERENCES_UPDATED
+SEAT_RESERVED
+SEAT_CHECKED_IN
+SEAT_RESERVATION_EXPIRED
+SEAT_OCCUPANCY_HIGH
+BOOK_RESERVED
+BOOK_SUBSCRIBED
+BOOK_RETURNED
+BOOK_DUE_REMINDER_SENT
+BOOK_QUEUE_NOTIFICATION_SENT
+BOOK_PICKUP_EXPIRED
+BOOK_ADDED
+NEW_BOOK_PREFERENCE_NOTIFICATION_SENT
