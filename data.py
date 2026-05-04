@@ -7,6 +7,24 @@ seats = [
     {"id": "B2", "is_available": True, "reserved_by": None,"reserved_until":None, "qr_checked": False},
 ]
 
+preference_options = {
+    "categories": [
+        "Computer Networks",
+        "Software Engineering",
+        "Operating Systems",
+        "Database Systems",
+        "Artificial Intelligence",
+    ],
+    "authors": [
+        "Andrew S. Tanenbaum",
+        "Robert C. Martin",
+        "Silberschatz",
+        "Martin Fowler",
+        "Stuart Russell",
+    ],
+}
+
+
 books = [
     {
         "id": 1,
@@ -52,7 +70,21 @@ books = [
 
 notifications = []
 
-users = ["user1", "user2", "user3", "user4"]
+users = [
+    {
+        "id": "user1",
+        "name": "User One",
+        "favorite_categories": [],
+        "favorite_authors": [],
+    },
+    {
+        "id": "user2",
+        "name": "User Two",
+        "favorite_categories": [],
+        "favorite_authors": [],
+    },
+]
+
 
 seat_waiting_users = []
 

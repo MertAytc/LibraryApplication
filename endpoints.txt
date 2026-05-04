@@ -1,0 +1,34 @@
+USER PART
+POST /users/register
+POST /users/login
+GET  /preferences/options
+POST /users/{user_id}/preferences
+GET  /users/{user_id}/preferences
+
+SEAT PART
+GET  /seats
+GET  /seats/occupancy
+POST /seats/{seat_id}/reserve
+POST /seats/{seat_id}/check-in
+GET  /users/{user_id}/seat-reservation
+POST /seats/subscribe-availability
+
+BOOK PART
+GET  /books
+GET  /books/search?query=...
+POST /books/{book_id}/reserve
+POST /books/{book_id}/subscribe
+GET  /users/{user_id}/waiting-books
+GET  /users/{user_id}/borrowed-books
+
+NOTIFICATION PART
+GET  /notifications/{user_id}
+
+ADMIN PART
+POST /admin/books/{book_id}/return
+POST /admin/books
+GET  /events
+
+Seat reservation expiry: 55 saniye
+Book due reminder: 40 saniye sonra
+Book queue pickup: 20 saniye

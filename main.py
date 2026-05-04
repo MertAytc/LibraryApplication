@@ -1,13 +1,31 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from data import events, notifications
-from models import ReserveSeatRequest, SubscribeBookRequest, SeatAvailabilitySubscribeRequest
+
+from data import events, notifications,preference_options,seat_waiting_users,seats
+from models import (
+    ReserveSeatRequest, 
+    SubscribeBookRequest, 
+    SeatAvailabilitySubscribeRequest,
+    RegisterUserRequest,
+    UserPreferencesRequest,
+    AddBookRequest
+    )
 from services.library_server import LibraryServer
 
 app = FastAPI(
     title="Library Communication Patterns API",
     description="A simple backend that demonstrates request-response, queue, publish-subscribe, and event-driven communication without WebSocket.",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 library_server = LibraryServer()
 
@@ -18,6 +36,44 @@ def root() -> dict:
         "message": "Library backend is running.",
         "websocket_used": False,
     }
+
+@app.post("/users/register")
+def register_user(request: RegisterUserRequest) -> dict:
+    return library_server.register_user(
+        user_id=request.user_id,
+        name=request.name,
+    )
+
+
+@app.post("/users/login")
+def login_user(request: ReserveSeatRequest) -> dict:
+    return library_server.login_user(request.user_id)
+
+@app.get("/admin/users")
+def get_users() -> list[dict]:
+    return library_server.get_users()
+
+
+
+@app.post("/users/{user_id}/preferences")
+def update_user_preferences(
+    user_id: str,
+    request: UserPreferencesRequest,
+) -> dict:
+    return library_server.update_user_preferences(
+        user_id=user_id,
+        favorite_categories=request.favorite_categories,
+        favorite_authors=request.favorite_authors,
+    )
+
+@app.get("/users/{user_id}/preferences")
+def get_user_preferences(user_id: str) -> dict:
+    return library_server.get_user_preferences(user_id)
+
+@app.get("/preferences/options")
+def get_preference_options() -> dict:
+    return library_server.get_preference_options()
+
 
 
 @app.get("/seats")
@@ -83,6 +139,9 @@ def search_books(query: str) -> list[dict]:
 def get_user_waiting_books(user_id: str) -> list[dict]:
     return library_server.get_user_waiting_books(user_id)
 
+@app.get("/users/{user_id}/borrowed-books")
+def get_user_borrowed_books(user_id: str) -> list[dict]:
+    return library_server.get_user_borrowed_books(user_id)
 
 
 @app.post("/books/{book_id}/subscribe")
@@ -93,6 +152,14 @@ def subscribe_to_book(book_id: int, request: SubscribeBookRequest) -> dict:
 @app.post("/admin/books/{book_id}/return")
 def admin_return_book(book_id: int) -> dict:
     return library_server.return_book(book_id)
+
+@app.post("/admin/books")
+def add_book(request: AddBookRequest) -> dict:
+    return library_server.add_book(
+        title=request.title,
+        author=request.author,
+        category=request.category,
+    )
 
 @app.post("/system/check-expired-book-pickups")
 def check_expired_book_pickups() -> dict:

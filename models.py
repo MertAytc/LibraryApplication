@@ -1,6 +1,16 @@
 from pydantic import BaseModel
 
 
+class RegisterUserRequest(BaseModel):
+    user_id: str
+    name: str
+
+
+class UserPreferencesRequest(BaseModel):
+    favorite_categories: list[str] = []
+    favorite_authors: list[str] = []
+
+
 class ReserveSeatRequest(BaseModel):
     user_id: str
 
@@ -32,6 +42,11 @@ class Book(BaseModel):
     reserved_until: str | None = None
     waiting_queue: list[str] = []
     notified_user: str | None = None
+
+class AddBookRequest(BaseModel):
+    title: str
+    author: str
+    category: str
 
 
 
