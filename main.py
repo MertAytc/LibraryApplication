@@ -33,8 +33,7 @@ library_server = LibraryServer()
 @app.get("/")
 def root() -> dict:
     return {
-        "message": "Library backend is running.",
-        "websocket_used": False,
+        "message": "Library backend is running."
     }
 
 @app.post("/users/register")
@@ -83,8 +82,6 @@ def get_seats() -> list[dict]:
 @app.get("/seats/occupancy")
 def get_seat_occupancy() -> dict:
     return library_server.get_seat_occupancy()
-
-
 
 @app.post("/seats/{seat_id}/reserve")
 def reserve_seat(seat_id: str, request: ReserveSeatRequest) -> dict:

@@ -1,8 +1,10 @@
-from data import books, events, seats, seat_waiting_users, users,preference_options
+from data import books, events, seats, seat_waiting_users, users,preference_options,seat_occupancy_state
 from services.message_broker import MessageBroker
 from services.notification_service import NotificationService
 from datetime import datetime,timedelta,timezone
 from threading import Timer
+import random
+
 
 
 class LibraryServer:
@@ -173,8 +175,7 @@ class LibraryServer:
             f"Seat {seat_id} was reserved by {user_id} until {seat['reserved_until']}.",
         )
 
-        occupancy_event = self.check_seat_occupancy()
-
+        occupancy_event = self.check_seat_occupancy(excluded_user_id=user_id)
         Timer(55, self.check_expired_seat_reservations).start()
 
         return {
@@ -241,7 +242,7 @@ class LibraryServer:
             "seat_notifications": seat_notifications,
         }
     
-    def check_seat_occupancy(self) -> dict | None:
+    def check_seat_occupancy(self, excluded_user_id: str | None = None) -> dict | None:
         total_seats = len(seats)
         reserved_or_occupied_seats = len([
             seat for seat in seats
@@ -251,7 +252,14 @@ class LibraryServer:
         occupancy_rate = reserved_or_occupied_seats / total_seats
 
         if occupancy_rate <= 0.8:
+            seat_occupancy_state["high_occupancy_notified"] = False
             return None
+
+        if seat_occupancy_state["high_occupancy_notified"]:
+            return {
+                "message": "High occupancy notification was already sent.",
+                "occupancy_rate": occupancy_rate,
+            }
 
         event = self.message_broker.publish(
             "SEAT_OCCUPANCY_HIGH",
@@ -261,6 +269,9 @@ class LibraryServer:
         sent_notifications = []
 
         for user in users:
+            if user["id"] == excluded_user_id:
+                continue
+
             notification = self.notification_service.send(
                 user_id=user["id"],
                 title="Library is crowded",
@@ -268,16 +279,20 @@ class LibraryServer:
             )
             sent_notifications.append(notification)
 
+
         self.message_broker.publish(
             "BROADCAST_NOTIFICATION_SENT",
             "High occupancy notification sent to all users.",
         )
+
+        seat_occupancy_state["high_occupancy_notified"] = True
 
         return {
             "event": event,
             "sent_notifications": sent_notifications,
             "occupancy_rate": occupancy_rate,
         }
+
     
     def subscribe_to_seat_availability(self, user_id: str) -> dict:
         available_seats = [
@@ -334,9 +349,7 @@ class LibraryServer:
         seat_waiting_users.clear()
 
         return sent_notifications
-
-
-
+    
     def check_expired_seat_reservations(self) -> dict:
         now = datetime.now(timezone.utc)
         expired_seats = []
@@ -350,6 +363,7 @@ class LibraryServer:
             reserved_until_time = datetime.fromisoformat(reserved_until)
 
             if reserved_until_time <= now:
+                expired_user = seat.get("reserved_by")
                 expired_seats.append(seat["id"])
 
                 seat["is_available"] = True
@@ -362,6 +376,18 @@ class LibraryServer:
                     f"Seat {seat['id']} reservation expired and became available again.",
                 )
 
+                if expired_user is not None:
+                    self.notification_service.send(
+                        user_id=expired_user,
+                        title="Seat Reservation Expired",
+                        message=f"Your reservation for seat {seat['id']} expired because you did not scan the QR code.",
+                    )
+
+                    self.message_broker.publish(
+                        "SEAT_EXPIRATION_NOTIFICATION_SENT",
+                        f"Seat expiration notification sent to {expired_user} for seat {seat['id']}.",
+                    )
+
                 self.notify_seat_waiting_users(seat["id"])
 
         return {
@@ -369,6 +395,9 @@ class LibraryServer:
             "expired_seats": expired_seats,
             "message": f"{len(expired_seats)} expired seat reservation(s) cleared.",
         }
+
+
+
     
     def get_seat_occupancy(self) -> dict:
         total_seats = len(seats)
@@ -426,13 +455,48 @@ class LibraryServer:
             "BOOK_RESERVED",
             f"{book['title']} was reserved by {user_id}. Due date: {book['due_date']}.",
         )
+
+        recommendation = self.get_random_book_recommendation(book)
+        recommendation_notification = None
+
+        if recommendation is not None:
+            recommendation_notification = self.notification_service.send(
+                user_id=user_id,
+                title="Book Recommendation",
+                message=f"You may also like {recommendation['title']} from {recommendation['category']}.",
+            )
+
+            self.message_broker.publish(
+                "BOOK_RECOMMENDATION_SENT",
+                f"Recommendation sent to {user_id}: {recommendation['title']}.",
+            )
+
         Timer(40, self.send_book_due_reminder, args=[book_id]).start()
+
         return {
             "success": True,
             "message": "Book reserved successfully.",
             "book": book,
             "event": event,
+            "recommendation": recommendation,
+            "recommendation_notification": recommendation_notification,
         }
+
+    
+    def get_random_book_recommendation(self, current_book: dict) -> dict | None:
+        same_category_books = [
+            book
+            for book in books
+            if book["id"] != current_book["id"]
+            and book.get("category") == current_book.get("category")
+            and book.get("is_available")
+        ]
+
+        if not same_category_books:
+            return None
+
+        return random.choice(same_category_books)
+
     
     def send_book_due_reminder(self, book_id: int) -> dict:
         book = self._find_book(book_id)
@@ -551,7 +615,11 @@ class LibraryServer:
 
         if book["is_available"]:
             return {"success": False, "message": "Book is already available."}
-
+        if book.get("borrowed_by") == user_id:
+            return {
+                "success": False,
+                "message": "You already borrowed this book.",
+            }
         if user_id in book["waiting_queue"]:
             return {"success": False, "message": "User is already in the queue."}
 
@@ -568,6 +636,7 @@ class LibraryServer:
             "book": book,
             "event": event,
         }
+    
     def get_user_waiting_books(self, user_id: str) -> list[dict]:
         waiting_books = []
 
