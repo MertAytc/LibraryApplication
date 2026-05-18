@@ -1,7 +1,5 @@
 import json
-
 import pika
-
 from data import events
 
 
@@ -9,6 +7,22 @@ class MessageBroker:
 
     def __init__(self) -> None:
         self.queue_name = "library_events"
+        self._connection = None
+        self._channel = None
+
+    def _get_channel(self):
+        try:
+            if self._connection is None or self._connection.is_closed:
+                self._connection = pika.BlockingConnection(
+                    pika.ConnectionParameters(host="localhost")
+                )
+                self._channel = self._connection.channel()
+                self._channel.queue_declare(queue=self.queue_name, durable=True)
+        except Exception as error:
+            print(f"[MESSAGE_BROKER] Connection error: {error}", flush=True)
+            self._connection = None
+            self._channel = None
+        return self._channel
 
     def publish(self, event_type: str, message: str) -> dict:
         event = {
@@ -19,12 +33,10 @@ class MessageBroker:
         events.append(event)
 
         try:
-            connection = pika.BlockingConnection(
-                pika.ConnectionParameters(host="localhost")
-            )
-            channel = connection.channel()
+            channel = self._get_channel()
 
-            channel.queue_declare(queue=self.queue_name, durable=True)
+            if channel is None:
+                raise Exception("Channel could not be established.")
 
             channel.basic_publish(
                 exchange="",
@@ -35,10 +47,8 @@ class MessageBroker:
                 ),
             )
 
-            connection.close()
-
             print(
-                f"[RABBITMQ] Published event to {self.queue_name}: {event_type} - {message}",
+                f"[RABBITMQ] Published: {event_type} - {message}",
                 flush=True,
             )
 
@@ -54,4 +64,10 @@ class MessageBroker:
 
         return event
 
-
+    def close(self):
+        try:
+            if self._connection and not self._connection.is_closed:
+                self._connection.close()
+                print("[MESSAGE_BROKER] Connection closed.", flush=True)
+        except Exception as error:
+            print(f"[MESSAGE_BROKER] Error closing connection: {error}", flush=True)

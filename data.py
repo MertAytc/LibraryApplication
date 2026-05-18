@@ -1,22 +1,21 @@
 seats = [
-    {"id": "A1", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "A2", "is_available": False, "reserved_by": "user2","reserved_until":None, "qr_checked": False},
-    {"id": "A3", "is_available": True, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "A4", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "A5", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "A6", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "B1", "is_available": False, "reserved_by": "user3","reserved_until":None, "qr_checked": False},
-    {"id": "B2", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "B3", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "B4", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "B5", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
-    {"id": "B6", "is_available": False, "reserved_by": None,"reserved_until":None, "qr_checked": False},
+    {"id": "A1", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "A2", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "A3", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "A4", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "A5", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "A6", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B1", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B2", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B3", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B4", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B5", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
+    {"id": "B6", "is_available": True, "reserved_by": None, "reserved_until": None, "qr_checked": False},
 ]
 
 seat_occupancy_state = {
     "high_occupancy_notified": False
 }
-
 
 preference_options = {
     "categories": [
@@ -35,20 +34,19 @@ preference_options = {
     ],
 }
 
-
 books = [
     {
         "id": 1,
         "title": "Clean Code",
         "author": "Robert C. Martin",
         "category": "Software Engineering",
-        "is_available": False,
-        "borrowed_by": "user2",
+        "is_available": True,
+        "borrowed_by": None,
         "due_date": None,
         "reserved_until": None,
         "waiting_queue": [],
         "due_reminder_sent": False,
-        "notified_user": None
+        "notified_user": None,
     },
     {
         "id": 2,
@@ -61,20 +59,20 @@ books = [
         "reserved_until": None,
         "waiting_queue": [],
         "due_reminder_sent": False,
-        "notified_user": None
+        "notified_user": None,
     },
     {
         "id": 3,
         "title": "Operating System Concepts",
         "author": "Silberschatz",
         "category": "Operating Systems",
-        "is_available": False,
-        "borrowed_by": "user3",
+        "is_available": True,
+        "borrowed_by": None,
         "due_date": None,
         "reserved_until": None,
         "waiting_queue": [],
         "due_reminder_sent": False,
-        "notified_user": None
+        "notified_user": None,
     },
     {
         "id": 4,
@@ -130,30 +128,46 @@ books = [
     },
 ]
 
-
 notifications = []
 
 users = [
     {
-        "id": "user1",
-        "name": "User One",
+        "id": "mert26",
+        "name": "Mert",
         "favorite_categories": [],
         "favorite_authors": [],
     },
     {
-        "id": "user2",
-        "name": "User Two",
+        "id": "zeynep34",
+        "name": "Zeynep",
+        "favorite_categories": [],
+        "favorite_authors": [],
+    },
+    {
+        "id": "ali42",
+        "name": "Ali",
+        "favorite_categories": [],
+        "favorite_authors": [],
+    },
+    {
+        "id": "ayse55",
+        "name": "Ayşe",
+        "favorite_categories": [],
+        "favorite_authors": [],
+    },
+    {
+        "id": "can99",
+        "name": "Can",
         "favorite_categories": [],
         "favorite_authors": [],
     },
 ]
 
-
 seat_waiting_users = []
-
 
 events = [
     {
-        "type": "SYSTEM_STARTED"
+        "type": "SYSTEM_STARTED",
+        "message": "Library system started.",
     }
 ]

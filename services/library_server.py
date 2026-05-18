@@ -1,17 +1,16 @@
-from data import books, events, seats, seat_waiting_users, users,preference_options,seat_occupancy_state
+from data import books, events, seats, seat_waiting_users, users, preference_options, seat_occupancy_state
 from services.message_broker import MessageBroker
 from services.notification_service import NotificationService
-from datetime import datetime,timedelta,timezone
+from datetime import datetime, timedelta, timezone
 from threading import Timer
-import random
 
-
-
+#contains the main business logic for users,seats,books and event publishing.
 class LibraryServer:
     def __init__(self) -> None:
         self.message_broker = MessageBroker()
         self.notification_service = NotificationService()
-
+    #--------USER FUNCTIONS----------
+    #registers a new user and publishes a USER_REGISTERED event.
     def register_user(self, user_id: str, name: str) -> dict:
         existing_user = self._find_user(user_id)
 
@@ -42,26 +41,20 @@ class LibraryServer:
             "user": user,
             "event": event,
         }
-    
-
+    #cheks whether a user exists and returns Login result.
     def login_user(self, user_id: str) -> dict:
         user = self._find_user(user_id)
 
         if user is None:
-            return {
-                "success": False,
-                "message": "User not found.",
-            }
+            return {"success": False, "message": "User not found."}
 
-        return {
-            "success": True,
-            "message": "Login successful.",
-            "user": user,
-        }
-    
+        return {"success": True, "message": "Login successful.", "user": user}
+
+    #returns all registered users for admin operations.
     def get_users(self) -> list[dict]:
         return users
 
+    #update a user's favorite categories and authors.
     def update_user_preferences(
         self,
         user_id: str,
@@ -71,10 +64,7 @@ class LibraryServer:
         user = self._find_user(user_id)
 
         if user is None:
-            return {
-                "success": False,
-                "message": "User not found.",
-            }
+            return {"success": False, "message": "User not found."}
 
         user["favorite_categories"] = favorite_categories
         user["favorite_authors"] = favorite_authors
@@ -91,14 +81,12 @@ class LibraryServer:
             "event": event,
         }
     
+    #returns the selected category and author preferences of a user.
     def get_user_preferences(self, user_id: str) -> dict:
         user = self._find_user(user_id)
 
         if user is None:
-            return {
-                "success": False,
-                "message": "User not found.",
-            }
+            return {"success": False, "message": "User not found."}
 
         return {
             "success": True,
@@ -107,20 +95,20 @@ class LibraryServer:
             "favorite_categories": user.get("favorite_categories", []),
             "favorite_authors": user.get("favorite_authors", []),
         }
+    #returns available cateogory and author options for preference selection.
     def get_preference_options(self) -> dict:
         return preference_options
 
-
+    
+    #--------SEAT FUNCTIONS----------
+    #returns all seats with their current availability and reservation status.
     def get_seats(self) -> list[dict]:
         return seats
-    
+
+    #returns the active seat reservation of a specific user.
     def get_user_seat_reservation(self, user_id: str) -> dict:
         reservation = next(
-            (
-                seat
-                for seat in seats
-                if seat["reserved_by"] == user_id
-            ),
+            (seat for seat in seats if seat["reserved_by"] == user_id),
             None,
         )
 
@@ -136,8 +124,7 @@ class LibraryServer:
             "message": "Active seat reservation found.",
             "seat": reservation,
         }
-
-
+    #reserves an available seat for a user and starts the QR check-in timer.
     def reserve_seat(self, seat_id: str, user_id: str) -> dict:
         seat = self._find_seat(seat_id)
 
@@ -145,11 +132,7 @@ class LibraryServer:
             return {"success": False, "message": "Seat not found."}
 
         existing_reservation = next(
-            (
-                seat_item
-                for seat_item in seats
-                if seat_item.get("reserved_by") == user_id
-            ),
+            (s for s in seats if s.get("reserved_by") == user_id),
             None,
         )
 
@@ -162,7 +145,7 @@ class LibraryServer:
 
         if not seat["is_available"]:
             return {"success": False, "message": "Seat is already reserved."}
-        
+
         reserved_until = datetime.now(timezone.utc) + timedelta(seconds=55)
 
         seat["is_available"] = False
@@ -185,7 +168,7 @@ class LibraryServer:
             "event": event,
             "occupancy_event": occupancy_event,
         }
-    
+    #marks a reserved seat as occupied after QR check-in.
     def check_in_seat(self, seat_id: str) -> dict:
         seat = self._find_seat(seat_id)
 
@@ -212,7 +195,7 @@ class LibraryServer:
             "seat": seat,
             "event": event,
         }
-    
+    #manually releases a reserved or occupied seat.
     def release_seat(self, seat_id: str) -> dict:
         seat = self._find_seat(seat_id)
 
@@ -231,24 +214,17 @@ class LibraryServer:
             "SEAT_RELEASED",
             f"Seat {seat_id} was manually released and became available.",
         )
-
-        seat_notifications = self.notify_seat_waiting_users(seat_id)
-
         return {
             "success": True,
             "message": "Seat released successfully.",
             "seat": seat,
             "event": event,
-            "seat_notifications": seat_notifications,
         }
-    
+
+    #checks seat occupancy and publishes a high occupancy event when it exceeds 80%.
     def check_seat_occupancy(self, excluded_user_id: str | None = None) -> dict | None:
         total_seats = len(seats)
-        reserved_or_occupied_seats = len([
-            seat for seat in seats
-            if not seat["is_available"]
-        ])
-
+        reserved_or_occupied_seats = len([s for s in seats if not s["is_available"]])
         occupancy_rate = reserved_or_occupied_seats / total_seats
 
         if occupancy_rate <= 0.8:
@@ -263,42 +239,20 @@ class LibraryServer:
 
         event = self.message_broker.publish(
             "SEAT_OCCUPANCY_HIGH",
-            f"Library seat occupancy is above 80%. Current occupancy: {occupancy_rate * 100:.0f}%.",
+            f"Library seat occupancy is above 80%. Current occupancy: {occupancy_rate * 100:.0f}%. excluded_user:{excluded_user_id}",
         )
 
-        sent_notifications = []
-
-        for user in users:
-            if user["id"] == excluded_user_id:
-                continue
-
-            notification = self.notification_service.send(
-                user_id=user["id"],
-                title="Library is crowded",
-                message=f"Seat occupancy is above 80%. Current occupancy: {occupancy_rate * 100:.0f}%.",
-            )
-            sent_notifications.append(notification)
-
-
-        self.message_broker.publish(
-            "BROADCAST_NOTIFICATION_SENT",
-            "High occupancy notification sent to all users.",
-        )
 
         seat_occupancy_state["high_occupancy_notified"] = True
 
         return {
             "event": event,
-            "sent_notifications": sent_notifications,
             "occupancy_rate": occupancy_rate,
         }
 
-    
+    #subscribes a user to seat availability notifications when no seats are available.
     def subscribe_to_seat_availability(self, user_id: str) -> dict:
-        available_seats = [
-            seat for seat in seats
-            if seat["is_available"]
-        ]
+        available_seats = [s for s in seats if s["is_available"]]
 
         if available_seats:
             return {
@@ -326,8 +280,9 @@ class LibraryServer:
             "waiting_users": seat_waiting_users,
             "event": event,
         }
-
+    #sends seat availability notifications to users waiting for an empty seat.
     def notify_seat_waiting_users(self, seat_id: str) -> list[dict]:
+        """Consumer tarafından POST /seats/{seat_id}/notify-waiting üzerinden çağrılır."""
         sent_notifications = []
 
         if not seat_waiting_users:
@@ -349,7 +304,8 @@ class LibraryServer:
         seat_waiting_users.clear()
 
         return sent_notifications
-    
+
+    #releases seat reservations that expşred before QR check-in.
     def check_expired_seat_reservations(self) -> dict:
         now = datetime.now(timezone.utc)
         expired_seats = []
@@ -373,40 +329,18 @@ class LibraryServer:
 
                 self.message_broker.publish(
                     "SEAT_RESERVATION_EXPIRED",
-                    f"Seat {seat['id']} reservation expired and became available again.",
+                    f"Seat {seat['id']} reservation expired. expired_user:{expired_user}",
                 )
-
-                if expired_user is not None:
-                    self.notification_service.send(
-                        user_id=expired_user,
-                        title="Seat Reservation Expired",
-                        message=f"Your reservation for seat {seat['id']} expired because you did not scan the QR code.",
-                    )
-
-                    self.message_broker.publish(
-                        "SEAT_EXPIRATION_NOTIFICATION_SENT",
-                        f"Seat expiration notification sent to {expired_user} for seat {seat['id']}.",
-                    )
-
-                self.notify_seat_waiting_users(seat["id"])
-
         return {
             "success": True,
             "expired_seats": expired_seats,
             "message": f"{len(expired_seats)} expired seat reservation(s) cleared.",
         }
 
-
-
-    
+    ##calculates and returns the current seat occupancy rate.
     def get_seat_occupancy(self) -> dict:
         total_seats = len(seats)
-        occupied_or_reserved = len([
-            seat
-            for seat in seats
-            if not seat["is_available"]
-        ])
-
+        occupied_or_reserved = len([s for s in seats if not s["is_available"]])
         occupancy_rate = occupied_or_reserved / total_seats
 
         return {
@@ -416,11 +350,14 @@ class LibraryServer:
             "occupancy_rate": occupancy_rate,
             "occupancy_percent": round(occupancy_rate * 100, 2),
         }
-   
- 
+
+    # -------BOOK FUNCTIONS--------
+
+    #returns all books with availability, borrower and queue information.
     def get_books(self) -> list[dict]:
         return books
-    
+
+    #reserves an available book for a user and starts the due reminder time.
     def reserve_book(self, book_id: int, user_id: str) -> dict:
         book = self._find_book(book_id)
 
@@ -433,6 +370,7 @@ class LibraryServer:
                 "message": "Book is currently borrowed. You can subscribe to the waiting queue.",
                 "book": book,
             }
+
         notified_user = book.get("notified_user")
 
         if notified_user is not None and notified_user != user_id:
@@ -440,6 +378,12 @@ class LibraryServer:
                 "success": False,
                 "message": "This book is temporarily reserved for another user in the queue.",
                 "notified_user": notified_user,
+                "queue_count": len(book.get("waiting_queue", [])),
+                "queue_position": (
+                    book["waiting_queue"].index(user_id) + 1
+                    if user_id in book.get("waiting_queue", [])
+                    else None
+                ),
             }
 
         due_date = datetime.now(timezone.utc) + timedelta(seconds=60)
@@ -449,28 +393,12 @@ class LibraryServer:
         book["due_date"] = due_date.isoformat()
         book["reserved_until"] = None
         book["notified_user"] = None
-        book["due_reminder_sent"]=False
+        book["due_reminder_sent"] = False
 
         event = self.message_broker.publish(
             "BOOK_RESERVED",
-            f"{book['title']} was reserved by {user_id}. Due date: {book['due_date']}.",
+            f"{book['title']} was reserved by {user_id} in category {book.get('category')}. Due date: {book['due_date']}.",
         )
-
-        recommendation = self.get_random_book_recommendation(book)
-        recommendation_notification = None
-
-        if recommendation is not None:
-            recommendation_notification = self.notification_service.send(
-                user_id=user_id,
-                title="Book Recommendation",
-                message=f"You may also like {recommendation['title']} from {recommendation['category']}.",
-            )
-
-            self.message_broker.publish(
-                "BOOK_RECOMMENDATION_SENT",
-                f"Recommendation sent to {user_id}: {recommendation['title']}.",
-            )
-
         Timer(40, self.send_book_due_reminder, args=[book_id]).start()
 
         return {
@@ -478,26 +406,8 @@ class LibraryServer:
             "message": "Book reserved successfully.",
             "book": book,
             "event": event,
-            "recommendation": recommendation,
-            "recommendation_notification": recommendation_notification,
         }
-
-    
-    def get_random_book_recommendation(self, current_book: dict) -> dict | None:
-        same_category_books = [
-            book
-            for book in books
-            if book["id"] != current_book["id"]
-            and book.get("category") == current_book.get("category")
-            and book.get("is_available")
-        ]
-
-        if not same_category_books:
-            return None
-
-        return random.choice(same_category_books)
-
-    
+    #sends a due date reminder notification to the current borrower.
     def send_book_due_reminder(self, book_id: int) -> dict:
         book = self._find_book(book_id)
 
@@ -541,7 +451,7 @@ class LibraryServer:
             "event": event,
         }
 
-    
+    #checks borrowed books and sends reminders for books near their due date.
     def check_book_due_reminders(self) -> dict:
         now = datetime.now(timezone.utc)
         reminder_threshold = now + timedelta(days=2)
@@ -572,14 +482,7 @@ class LibraryServer:
                 )
 
                 book["due_reminder_sent"] = True
-
-                sent_reminders.append(
-                    {
-                        "book": book,
-                        "notification": notification,
-                        "event": event,
-                    }
-                )
+                sent_reminders.append({"book": book, "notification": notification, "event": event})
 
         return {
             "success": True,
@@ -587,26 +490,19 @@ class LibraryServer:
             "message": f"{len(sent_reminders)} due reminder(s) sent.",
         }
 
-
-    
+    #searches books by title,author and category.
     def search_books(self, query: str) -> list[dict]:
         query = query.lower()
 
-        matched_books = [
-            {
-                **book,
-                "queue_count": len(book.get("waiting_queue", [])),
-            }
+        return [
+            {**book, "queue_count": len(book.get("waiting_queue", []))}
             for book in books
             if query in book.get("title", "").lower()
             or query in book.get("author", "").lower()
             or query in book.get("category", "").lower()
         ]
 
-        return matched_books
-
-
-
+    #adds a user to the waiting queue of a borrowed book
     def subscribe_to_book(self, book_id: int, user_id: str) -> dict:
         book = self._find_book(book_id)
 
@@ -615,11 +511,10 @@ class LibraryServer:
 
         if book["is_available"]:
             return {"success": False, "message": "Book is already available."}
+
         if book.get("borrowed_by") == user_id:
-            return {
-                "success": False,
-                "message": "You already borrowed this book.",
-            }
+            return {"success": False, "message": "You already borrowed this book."}
+
         if user_id in book["waiting_queue"]:
             return {"success": False, "message": "User is already in the queue."}
 
@@ -636,38 +531,30 @@ class LibraryServer:
             "book": book,
             "event": event,
         }
-    
+
+    #returns books that a user is waiting for with queue position.
     def get_user_waiting_books(self, user_id: str) -> list[dict]:
-        waiting_books = []
+        return [
+            {
+                **book,
+                "queue_position": book["waiting_queue"].index(user_id) + 1,
+                "queue_count": len(book["waiting_queue"]),
+            }
+            for book in books
+            if user_id in book["waiting_queue"]
+        ]
 
-        for book in books:
-            if user_id in book["waiting_queue"]:
-                waiting_books.append(
-                    {
-                        **book,
-                        "queue_position": book["waiting_queue"].index(user_id) + 1,
-                        "queue_count": len(book["waiting_queue"]),
-                    }
-                )
-
-        return waiting_books
-    
+    #returns books currently borrowed by a specific user.
     def get_user_borrowed_books(self, user_id: str) -> list[dict]:
-        borrowed_books = []
+        return [
+            {**book, "queue_count": len(book.get("waiting_queue", []))}
+            for book in books
+            if book.get("borrowed_by") == user_id
+        ]
 
-        for book in books:
-            if book.get("borrowed_by") == user_id:
-                borrowed_books.append(
-                    {
-                        **book,
-                        "queue_count": len(book.get("waiting_queue", [])),
-                    }
-                )
-
-        return borrowed_books
-
-    
+    #botifies the next user in a book's waiting queue.
     def notify_next_book_waiting_user(self, book: dict) -> dict | None:
+        """Consumer tarafından POST /books/{book_id}/notify-next üzerinden çağrılır."""
         if not book["waiting_queue"]:
             book["notified_user"] = None
             book["reserved_until"] = None
@@ -694,8 +581,7 @@ class LibraryServer:
 
         return notification
 
-
-
+    #marks a borrowed book as returned and publishes a BOOK_RETURNED event.
     def return_book(self, book_id: int) -> dict:
         book = self._find_book(book_id)
 
@@ -712,21 +598,18 @@ class LibraryServer:
         book["due_date"] = None
         book["due_reminder_sent"] = False
 
-        published_event = self.message_broker.publish(
+        event = self.message_broker.publish(
             "BOOK_RETURNED",
-            f"{book['title']} was returned to the library by {previous_borrower}.",
+            f"{book['title']} was returned by {previous_borrower}. book_id:{book_id}",
         )
-
-        notification = self.notify_next_book_waiting_user(book)
-
         return {
             "success": True,
-            "message": "Book returned successfully by admin.",
+            "message": "Book returned successfully.",
             "book": book,
-            "event": published_event,
-            "notification": notification,
+            "event": event,
         }
-    
+
+    #adds a new book to the library and published a BOOK_ADDED event.
     def add_book(self, title: str, author: str, category: str) -> dict:
         new_book_id = max((book["id"] for book in books), default=0) + 1
 
@@ -748,38 +631,16 @@ class LibraryServer:
 
         event = self.message_broker.publish(
             "BOOK_ADDED",
-            f"Admin added new book: {title} by {author} in {category}.",
+            f"Admin added new book: {title} by {author} in category {category}.",
         )
-
-        matched_notifications = []
-
-        for user in users:
-            favorite_categories = user.get("favorite_categories", [])
-            favorite_authors = user.get("favorite_authors", [])
-
-            if category in favorite_categories or author in favorite_authors:
-                notification = self.notification_service.send(
-                    user_id=user["id"],
-                    title="New Book Added",
-                    message=f"{title} by {author} was added in your favorite category or author list.",
-                )
-                matched_notifications.append(notification)
-
-        if matched_notifications:
-            self.message_broker.publish(
-                "NEW_BOOK_PREFERENCE_NOTIFICATION_SENT",
-                f"New book notification sent to {len(matched_notifications)} user(s).",
-            )
-
         return {
             "success": True,
             "message": "Book added successfully.",
             "book": book,
             "event": event,
-            "matched_notifications": matched_notifications,
         }
 
-    
+    #moves to the next waiting user when a notified user does not reserve the book in time.
     def check_expired_book_pickups(self) -> dict:
         now = datetime.now(timezone.utc)
         expired_pickups = []
@@ -794,17 +655,15 @@ class LibraryServer:
             reserved_until_time = datetime.fromisoformat(reserved_until)
 
             if reserved_until_time <= now:
-                expired_pickups.append(
-                    {
-                        "book_id": book["id"],
-                        "book_title": book["title"],
-                        "expired_user": notified_user,
-                    }
-                )
+                expired_pickups.append({
+                    "book_id": book["id"],
+                    "book_title": book["title"],
+                    "expired_user": notified_user,
+                })
 
                 self.message_broker.publish(
                     "BOOK_PICKUP_EXPIRED",
-                    f"{notified_user} did not reserve {book['title']} in time.",
+                    f"{notified_user} did not reserve {book['title']} in time. book_id:{book['id']}",
                 )
 
                 book["notified_user"] = None
@@ -818,12 +677,16 @@ class LibraryServer:
             "message": f"{len(expired_pickups)} expired book pickup(s) handled.",
         }
 
+    # -----HELPER FUNCTIONS------
 
+    #finds and returns a user by user ID.
     def _find_user(self, user_id: str) -> dict | None:
         return next((user for user in users if user["id"] == user_id), None)
 
+    #finds and returns a seat by seat ID.
     def _find_seat(self, seat_id: str) -> dict | None:
         return next((seat for seat in seats if seat["id"] == seat_id), None)
 
+    #finds and returns a book by book ID.
     def _find_book(self, book_id: int) -> dict | None:
         return next((book for book in books if book["id"] == book_id), None)
